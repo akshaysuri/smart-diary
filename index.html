@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Diary</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{--bg:#eef1f0;--panel:#fff;--ink:#1f2a2e;--mute:#5d6b70;--line:#cbd5d1;--tool:#0f766e;--card:#b45309;--contact:#3b5bdb;--note:#6b7280}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "IBM Plex Sans",system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 90px}
+h1{font-size:22px;margin:0 0 14px;font-weight:600}
+.search{width:100%;padding:14px 16px;font:inherit;font-size:18px;border:2px solid var(--ink);border-radius:8px;background:var(--panel)}
+.search:focus,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #7aa7ff;outline-offset:2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:5px 12px;font:inherit;font-size:14px;cursor:pointer;color:var(--ink)}
+.chip[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.best{background:var(--panel);border-left:5px solid var(--card);padding:10px 14px;border-radius:6px;margin:12px 0}
+.best b{font-weight:600}
+.best ol{margin:6px 0 0;padding-left:20px}
+.row{display:grid;grid-template-columns:6px 1fr auto;gap:12px;background:var(--panel);border-radius:8px;margin-bottom:8px;overflow:hidden;cursor:pointer;border:1px solid var(--line);width:100%;text-align:left;font:inherit;color:inherit;padding:0}
+.row>i{display:block}
+.row .body{padding:10px 0}
+.row .t{font-weight:600}
+.row .d{color:var(--mute);font-size:14px;white-space:pre-line}
+.row .tags{font-size:13px;color:var(--mute);margin-top:2px}
+.row .side{padding:10px 14px;font-weight:600;font-size:20px;align-self:center}
+.empty{color:var(--mute);padding:30px 0;text-align:center}
+.notice{background:#fff7e0;border:1px solid #e8c766;padding:8px 12px;border-radius:6px;font-size:14px;margin-bottom:12px}
+.fab{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:14px 22px;font:inherit;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+dialog{border:0;border-radius:10px;padding:20px;width:min(480px,94vw);max-height:92vh}
+dialog::backdrop{background:rgba(20,30,30,.5)}
+label{display:block;font-size:14px;color:var(--mute);margin:12px 0 4px}
+input,textarea,select{width:100%;padding:9px 10px;font:inherit;border:1px solid var(--line);border-radius:6px;background:#fff}
+textarea{min-height:80px}
+.actions{display:flex;gap:8px;margin-top:18px}
+.actions button{padding:10px 16px;font:inherit;border-radius:6px;border:1px solid var(--ink);background:#fff;cursor:pointer}
+.actions .primary{background:var(--ink);color:#fff}
+.actions .danger{margin-left:auto;color:#b42318;border-color:#b42318}
+@media (prefers-reduced-motion:no-preference){.row{transition:border-color .15s}.row:hover{border-color:var(--ink)}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Smart Diary</h1>
+  <div id="notice"></div>
+  <input id="q" class="search" type="search" placeholder="Search tools, cards, contacts, tags…" autocomplete="off">
+  <div class="chips" id="types" role="group" aria-label="Filter by type"></div>
+  <div class="chips" id="tags" role="group" aria-label="Filter by tag"></div>
+  <div id="best"></div>
+  <div id="list"></div>
+</main>
+<button class="fab" id="add">+ Add entry</button>
+
+<dialog id="dlg">
+  <form method="dialog" id="form" onsubmit="return false">
+    <h2 id="dlgTitle" style="margin:0 0 4px;font-size:18px">Add entry</h2>
+    <label for="f_type">Type</label>
+    <select id="f_type"></select>
+    <label for="f_title">Name</label>
+    <input id="f_title" required>
+    <div id="dyn"></div>
+    <label for="f_tags">Tags (comma separated, e.g. gardening, plumbing)</label>
+    <input id="f_tags">
+    <div class="actions">
+      <button class="primary" id="save">Save</button>
+      <button id="cancel" type="button">Cancel</button>
+      <button class="danger" id="del" type="button" hidden>Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+// ---- 1. Paste your Supabase details here (see setup steps). Leave blank to try the app with local-only storage.
+const SUPABASE_URL = "";
+const SUPABASE_KEY = "";
+
+const TYPES = {
+  tool:    {label:"Tool",    color:"var(--tool)",    fields:[["qty","Quantity","number"],["location","Where it is kept","text"],["notes","Notes","area"]]},
+  card:    {label:"Card",    color:"var(--card)",    fields:[["network","Card ID (last 4 digits only)","text"],["rules","Cashback rules, one per line (e.g. Amazon 5%)","area"],["notes","Notes","area"]]},
+  contact: {label:"Contact", color:"var(--contact)", fields:[["phone","Phone","tel"],["address","Address / area","text"],["notes","Notes","area"]]},
+  note:    {label:"Note",    color:"var(--note)",    fields:[["notes","Details","area"]]}
+};
+const $ = id => document.getElementById(id);
+const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+let entries = [], typeFilter = null, tagFilter = null, editing = null;
+
+// ---- storage: Supabase when configured, else this browser only
+const Store = {
+  async load(){
+    if(sb){ const {data,error} = await sb.from("entries").select("*").order("created_at",{ascending:false}); if(error) throw error; return data; }
+    return JSON.parse(localStorage.getItem("diary") || "[]");
+  },
+  async save(e){
+    if(sb){ const {error} = await sb.from("entries").upsert(e); if(error) throw error; return; }
+    const all = await this.load(); const i = all.findIndex(x=>x.id===e.id);
+    i>=0 ? all[i]=e : all.unshift(e); localStorage.setItem("diary", JSON.stringify(all));
+  },
+  async remove(id){
+    if(sb){ const {error} = await sb.from("entries").delete().eq("id",id); if(error) throw error; return; }
+    const all = (await this.load()).filter(x=>x.id!==id); localStorage.setItem("diary", JSON.stringify(all));
+  }
+};
+
+async function refresh(){
+  try{ entries = await Store.load(); }
+  catch(err){ $("notice").innerHTML = '<div class="notice">Could not load data: '+esc(err.message)+'. Check your Supabase URL, key and table setup.</div>'; return; }
+  render();
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const text = e => [e.title, (e.tags||[]).join(" "), Object.values(e.data||{}).join(" ")].join(" ").toLowerCase();
+
+function render(){
+  if(!sb) $("notice").innerHTML = '<div class="notice">Local mode: data stays in this browser only. Add your Supabase details in index.html to sync across devices.</div>';
+  const q = $("q").value.trim().toLowerCase();
+  // type + tag chips
+  $("types").innerHTML = Object.entries(TYPES).map(([k,t]) => `<button class="chip" data-type="${k}" aria-pressed="${typeFilter===k}">${t.label}</button>`).join("");
+  const tags = [...new Set(entries.flatMap(e => e.tags||[]))].sort();
+  $("tags").innerHTML = tags.map(t => `<button class="chip" data-tag="${esc(t)}" aria-pressed="${tagFilter===t}">#${esc(t)}</button>`).join("");
+  // filter
+  const shown = entries.filter(e => (!typeFilter||e.type===typeFilter) && (!tagFilter||(e.tags||[]).includes(tagFilter)) && (!q||q.split(/\s+/).every(w => text(e).includes(w))));
+  renderBest(q);
+  $("list").innerHTML = shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing matches. Try fewer words." : "No entries yet. Tap “Add entry” to start."}</div>`;
+}
+
+function row(e){
+  const t = TYPES[e.type] || TYPES.note, d = e.data || {};
+  let detail = "", side = "";
+  if(e.type==="tool"){ side = "×" + (d.qty ?? "?"); detail = [d.location && "📍 "+d.location, d.notes].filter(Boolean).join("\n"); }
+  else if(e.type==="card"){ detail = [d.network && "Card "+d.network, d.rules].filter(Boolean).join("\n"); }
+  else if(e.type==="contact"){ detail = [d.phone, d.address, d.notes].filter(Boolean).join("\n"); }
+  else detail = d.notes || "";
+  return `<button class="row" data-id="${e.id}"><i style="background:${t.color}"></i><span class="body"><div class="t">${esc(e.title)}</div><div class="d">${esc(detail)}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${esc(side)}</span></button>`;
+}
+
+// "Which card?" ranking: when the search matches a rule line on a card, rank cards by that percentage
+function renderBest(q){
+  if(!q){ $("best").innerHTML=""; return; }
+  const hits = [];
+  entries.filter(e=>e.type==="card").forEach(c => {
+    (String(c.data?.rules||"").split("\n")).forEach(line => {
+      if(line.toLowerCase().includes(q)){ const m = line.match(/(\d+(?:\.\d+)?)\s*%/); if(m) hits.push({card:c.title, pct:parseFloat(m[1]), line:line.trim()}); }
+    });
+  });
+  hits.sort((a,b)=>b.pct-a.pct);
+  $("best").innerHTML = hits.length ? `<div class="best"><b>Best card for “${esc(q)}”</b><ol>${hits.map(h=>`<li>${esc(h.card)}: ${esc(h.line)}</li>`).join("")}</ol></div>` : "";
+}
+
+// ---- add / edit dialog
+function buildFields(type, data={}){
+  $("dyn").innerHTML = TYPES[type].fields.map(([k,l,kind]) =>
+    `<label for="d_${k}">${l}</label>` + (kind==="area" ? `<textarea id="d_${k}">${esc(data[k])}</textarea>` : `<input id="d_${k}" type="${kind}" value="${esc(data[k])}">`)
+  ).join("");
+}
+function openDlg(e){
+  editing = e || null;
+  $("f_type").innerHTML = Object.entries(TYPES).map(([k,t])=>`<option value="${k}">${t.label}</option>`).join("");
+  $("f_type").value = e ? e.type : (typeFilter || "tool");
+  $("f_title").value = e ? e.title : "";
+  $("f_tags").value = e ? (e.tags||[]).join(", ") : (tagFilter || "");
+  buildFields($("f_type").value, e ? e.data : {});
+  $("dlgTitle").textContent = e ? "Edit entry" : "Add entry";
+  $("del").hidden = !e;
+  $("dlg").showModal(); $("f_title").focus();
+}
+async function save(){
+  if(!$("f_title").value.trim()){ $("f_title").focus(); return; }
+  const type = $("f_type").value, data = {};
+  TYPES[type].fields.forEach(([k]) => { const v = $("d_"+k).value.trim(); if(v!=="") data[k] = v; });
+  const entry = {
+    id: editing ? editing.id : crypto.randomUUID(), type, title: $("f_title").value.trim(), data,
+    tags: $("f_tags").value.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean),
+    created_at: editing ? editing.created_at : new Date().toISOString()
+  };
+  try{ await Store.save(entry); $("dlg").close(); await refresh(); }
+  catch(err){ alert("Could not save: "+err.message); }
+}
+
+// ---- events
+$("q").addEventListener("input", render);
+$("add").onclick = () => openDlg();
+$("cancel").onclick = () => $("dlg").close();
+$("save").onclick = save;
+$("f_type").onchange = () => buildFields($("f_type").value);
+$("del").onclick = async () => { if(editing && confirm("Delete “"+editing.title+"”?")){ try{ await Store.remove(editing.id); $("dlg").close(); await refresh(); }catch(err){ alert("Could not delete: "+err.message); } } };
+$("list").onclick = ev => { const b = ev.target.closest(".row"); if(b) openDlg(entries.find(x=>x.id===b.dataset.id)); };
+$("types").onclick = ev => { const b = ev.target.closest("[data-type]"); if(b){ typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
+$("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
+
+refresh();
+</script>
+</body>
+</html>
