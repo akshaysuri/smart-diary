@@ -7,13 +7,13 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
-:root{--bg:#eef1f0;--panel:#fff;--ink:#1f2a2e;--mute:#5d6b70;--line:#cbd5d1;--tool:#0f766e;--card:#b45309;--contact:#3b5bdb;--note:#6b7280}
+:root{--bg:#eef1f0;--panel:#fff;--ink:#1f2a2e;--mute:#5d6b70;--line:#cbd5d1;--tool:#0f766e;--card:#b45309;--contact:#3b5bdb;--note:#6b7280;--waste:#7c3aed}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "IBM Plex Sans",system-ui,sans-serif}
 main{max-width:760px;margin:0 auto;padding:20px 16px 90px}
 h1{font-size:22px;margin:0 0 14px;font-weight:600}
 .search{width:100%;padding:14px 16px;font:inherit;font-size:18px;border:2px solid var(--ink);border-radius:8px;background:var(--panel)}
-.search:focus,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #7aa7ff;outline-offset:2px}
+.search:focus,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,.row:focus-visible{outline:3px solid #7aa7ff;outline-offset:2px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
 .chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:5px 12px;font:inherit;font-size:14px;cursor:pointer;color:var(--ink)}
 .chip[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
@@ -27,6 +27,7 @@ h1{font-size:22px;margin:0 0 14px;font-weight:600}
 .row .d{color:var(--mute);font-size:14px;white-space:pre-line}
 .row .tags{font-size:13px;color:var(--mute);margin-top:2px}
 .row .side{padding:10px 14px;font-weight:600;font-size:20px;align-self:center}
+.stepper{display:flex;align-items:center;gap:6px}.step{width:38px;height:38px;border-radius:50%;border:1px solid var(--ink);background:#fff;font:inherit;font-size:20px;line-height:1;cursor:pointer;padding:0;color:var(--ink)}.step:active{background:var(--line)}.q{min-width:26px;text-align:center}
 .empty{color:var(--mute);padding:30px 0;text-align:center}
 .notice{background:#fff7e0;border:1px solid #e8c766;padding:8px 12px;border-radius:6px;font-size:14px;margin-bottom:12px}
 .fab{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:14px 22px;font:inherit;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
@@ -46,7 +47,7 @@ textarea{min-height:80px}
 <main>
   <h1>Smart Diary</h1>
   <div id="notice"></div>
-  <input id="q" class="search" type="search" placeholder="Search tools, cards, contacts, tags…" autocomplete="off">
+  <input id="q" class="search" type="search" placeholder="Search tools, cards, contacts, items to sell…" autocomplete="off">
   <div class="chips" id="types" role="group" aria-label="Filter by type"></div>
   <div class="chips" id="tags" role="group" aria-label="Filter by tag"></div>
   <div id="best"></div>
@@ -81,6 +82,7 @@ const TYPES = {
   tool:    {label:"Tool",    color:"var(--tool)",    fields:[["qty","Quantity","number"],["location","Where it is kept","text"],["notes","Notes","area"]]},
   card:    {label:"Card",    color:"var(--card)",    fields:[["network","Card ID (last 4 digits only)","text"],["rules","Cashback rules, one per line (e.g. Amazon 5%)","area"],["notes","Notes","area"]]},
   contact: {label:"Contact", color:"var(--contact)", fields:[["phone","Phone","tel"],["address","Address / area","text"],["notes","Notes","area"]]},
+  waste:   {label:"To sell", color:"var(--waste)",   fields:[["qty","Quantity","number"],["location","Where it is kept","text"],["price","Asking price (₹)","number"],["notes","Notes","area"]]},
   note:    {label:"Note",    color:"var(--note)",    fields:[["notes","Details","area"]]}
 };
 const $ = id => document.getElementById(id);
@@ -127,12 +129,14 @@ function render(){
 
 function row(e){
   const t = TYPES[e.type] || TYPES.note, d = e.data || {};
+  const stepper = `<span class="stepper"><button type="button" class="step" data-d="-1" aria-label="Decrease quantity">−</button><span class="q">${esc(d.qty ?? 0)}</span><button type="button" class="step" data-d="1" aria-label="Increase quantity">+</button></span>`;
   let detail = "", side = "";
-  if(e.type==="tool"){ side = "×" + (d.qty ?? "?"); detail = [d.location && "📍 "+d.location, d.notes].filter(Boolean).join("\n"); }
+  if(e.type==="tool"){ side = stepper; detail = [d.location && "📍 "+d.location, d.notes].filter(Boolean).join("\n"); }
+  else if(e.type==="waste"){ side = stepper; detail = [d.location && "📍 "+d.location, d.price && "Asking ₹"+d.price, d.notes].filter(Boolean).join("\n"); }
   else if(e.type==="card"){ detail = [d.network && "Card "+d.network, d.rules].filter(Boolean).join("\n"); }
   else if(e.type==="contact"){ detail = [d.phone, d.address, d.notes].filter(Boolean).join("\n"); }
   else detail = d.notes || "";
-  return `<button class="row" data-id="${e.id}"><i style="background:${t.color}"></i><span class="body"><div class="t">${esc(e.title)}</div><div class="d">${esc(detail)}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${esc(side)}</span></button>`;
+  return `<div class="row" role="button" tabindex="0" data-id="${e.id}"><i style="background:${t.color}"></i><span class="body"><div class="t">${esc(e.title)}</div><div class="d">${esc(detail)}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${side}</span></div>`;
 }
 
 // "Which card?" ranking: when the search matches a rule line on a card, rank cards by that percentage
@@ -185,7 +189,18 @@ $("cancel").onclick = () => $("dlg").close();
 $("save").onclick = save;
 $("f_type").onchange = () => buildFields($("f_type").value);
 $("del").onclick = async () => { if(editing && confirm("Delete “"+editing.title+"”?")){ try{ await Store.remove(editing.id); $("dlg").close(); await refresh(); }catch(err){ alert("Could not delete: "+err.message); } } };
-$("list").onclick = ev => { const b = ev.target.closest(".row"); if(b) openDlg(entries.find(x=>x.id===b.dataset.id)); };
+$("list").onclick = async ev => {
+  const st = ev.target.closest(".step");
+  if(st){
+    const e = entries.find(x=>x.id===st.closest(".row").dataset.id); if(!e) return;
+    const n = Math.max(0, (parseInt(e.data?.qty,10)||0) + parseInt(st.dataset.d,10));
+    e.data = {...e.data, qty:n}; render();
+    try{ await Store.save(e); } catch(err){ alert("Could not save: "+err.message); refresh(); }
+    return;
+  }
+  const b = ev.target.closest(".row"); if(b) openDlg(entries.find(x=>x.id===b.dataset.id));
+};
+$("list").onkeydown = ev => { if(ev.key==="Enter" && ev.target.classList.contains("row")) openDlg(entries.find(x=>x.id===ev.target.dataset.id)); };
 $("types").onclick = ev => { const b = ev.target.closest("[data-type]"); if(b){ typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
 $("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
 
