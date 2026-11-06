@@ -17,20 +17,21 @@ h1{font-size:22px;margin:0 0 14px;font-weight:600}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
 .chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:5px 12px;font:inherit;font-size:14px;cursor:pointer;color:var(--ink)}
 .chip[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.show-all{border:1px solid var(--ink);border-radius:6px;background:var(--panel);padding:8px 14px;font:inherit;cursor:pointer;margin:2px 0 12px}
 .best{background:var(--panel);border-left:5px solid var(--card);padding:10px 14px;border-radius:6px;margin:12px 0}
 .best b{font-weight:600}
 .best ol{margin:6px 0 0;padding-left:20px}
-.row{display:grid;grid-template-columns:6px 1fr auto;gap:12px;background:var(--panel);border-radius:8px;margin-bottom:8px;overflow:hidden;cursor:pointer;border:1px solid var(--line);width:100%;text-align:left;font:inherit;color:inherit;padding:0}
+.row{display:grid;grid-template-columns:6px 1fr auto;gap:12px;background:var(--panel);border-radius:8px;margin-bottom:8px;overflow:hidden;cursor:pointer;border:1px solid var(--line);width:100%;text-align:left;color:inherit;font:inherit}
 .row>i{display:block}
 .row .body{padding:10px 0}
 .row .t{font-weight:600}
 .row .d{color:var(--mute);font-size:14px;white-space:pre-line}
 .row .tags{font-size:13px;color:var(--mute);margin-top:2px}
 .row .side{padding:10px 14px;font-weight:600;font-size:20px;align-self:center}
-.stepper{display:flex;align-items:center;gap:6px}.step{width:38px;height:38px;border-radius:50%;border:1px solid var(--ink);background:#fff;font:inherit;font-size:20px;line-height:1;cursor:pointer;padding:0;color:var(--ink)}.step:active{background:var(--line)}.q{min-width:26px;text-align:center}
+.stepper{display:flex;align-items:center;gap:6px}.step{width:38px;height:38px;border-radius:50%;border:1px solid var(--ink);background:#fff;font:inherit;font-size:20px;line-height:1;cursor:pointer}
 .empty{color:var(--mute);padding:30px 0;text-align:center}
 .notice{background:#fff7e0;border:1px solid #e8c766;padding:8px 12px;border-radius:6px;font-size:14px;margin-bottom:12px}
-.fab{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:14px 22px;font:inherit;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.fab{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:14px 22px;font:inherit;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2)}
 dialog{border:0;border-radius:10px;padding:20px;width:min(480px,94vw);max-height:92vh}
 dialog::backdrop{background:rgba(20,30,30,.5)}
 label{display:block;font-size:14px;color:var(--mute);margin:12px 0 4px}
@@ -50,6 +51,7 @@ textarea{min-height:80px}
   <input id="q" class="search" type="search" placeholder="Search tools, cards, contacts, items to sell…" autocomplete="off">
   <div class="chips" id="types" role="group" aria-label="Filter by type"></div>
   <div class="chips" id="tags" role="group" aria-label="Filter by tag"></div>
+  <button type="button" class="show-all" id="showAll" aria-expanded="false">Show all</button>
   <div id="best"></div>
   <div id="list"></div>
 </main>
@@ -74,7 +76,6 @@ textarea{min-height:80px}
 </dialog>
 
 <script>
-// ---- 1. Paste your Supabase details here (see setup steps). Leave blank to try the app with local-only storage.
 const SUPABASE_URL = "https://retlrbrclqdrlovsmmve.supabase.co";
 const SUPABASE_KEY = "sb_publishable_rpDo0biiUme5uUAi7nw8tg_jZgiM0BN";
 
@@ -87,9 +88,8 @@ const TYPES = {
 };
 const $ = id => document.getElementById(id);
 const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-let entries = [], typeFilter = null, tagFilter = null, editing = null;
+let entries = [], typeFilter = null, tagFilter = null, editing = null, showAll = false;
 
-// ---- storage: Supabase when configured, else this browser only
 const Store = {
   async load(){
     if(sb){ const {data,error} = await sb.from("entries").select("*").order("created_at",{ascending:false}); if(error) throw error; return data; }
@@ -111,19 +111,28 @@ async function refresh(){
   catch(err){ $("notice").innerHTML = '<div class="notice">Could not load data: '+esc(err.message)+'. Check your Supabase URL, key and table setup.</div>'; return; }
   render();
 }
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => String(s ?? "").replace(/[&<>\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const text = e => [e.title, (e.tags||[]).join(" "), Object.values(e.data||{}).join(" ")].join(" ").toLowerCase();
 
 function render(){
   if(!sb) $("notice").innerHTML = '<div class="notice">Local mode: data stays in this browser only. Add your Supabase details in index.html to sync across devices.</div>';
   const q = $("q").value.trim().toLowerCase();
-  // type + tag chips
   $("types").innerHTML = Object.entries(TYPES).map(([k,t]) => `<button class="chip" data-type="${k}" aria-pressed="${typeFilter===k}">${t.label}</button>`).join("");
   const tags = [...new Set(entries.flatMap(e => e.tags||[]))].sort();
   $("tags").innerHTML = tags.map(t => `<button class="chip" data-tag="${esc(t)}" aria-pressed="${tagFilter===t}">#${esc(t)}</button>`).join("");
-  // filter
-  const shown = entries.filter(e => (!typeFilter||e.type===typeFilter) && (!tagFilter||(e.tags||[]).includes(tagFilter)) && (!q||q.split(/\s+/).every(w => text(e).includes(w))));
+
+  const hasCriteria = Boolean(q || typeFilter || tagFilter);
+  const showResults = showAll || hasCriteria;
+  const shown = entries.filter(e => {
+    if(!showAll && (typeFilter && e.type !== typeFilter)) return false;
+    if(!showAll && tagFilter && !(e.tags||[]).includes(tagFilter)) return false;
+    if(!showAll && q && !q.split(/\s+/).every(w => text(e).includes(w))) return false;
+    return true;
+  });
+  $("showAll").textContent = showAll ? "Hide all" : "Show all";
+  $("showAll").setAttribute("aria-expanded", String(showAll));
   renderBest(q);
+  if(!showResults){ $("list").innerHTML = ""; return; }
   $("list").innerHTML = shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing matches. Try fewer words." : "No entries yet. Tap “Add entry” to start."}</div>`;
 }
 
@@ -136,10 +145,9 @@ function row(e){
   else if(e.type==="card"){ detail = [d.network && "Card "+d.network, d.rules].filter(Boolean).join("\n"); }
   else if(e.type==="contact"){ detail = [d.phone, d.address, d.notes].filter(Boolean).join("\n"); }
   else detail = d.notes || "";
-  return `<div class="row" role="button" tabindex="0" data-id="${e.id}"><i style="background:${t.color}"></i><span class="body"><div class="t">${esc(e.title)}</div><div class="d">${esc(detail)}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${side}</span></div>`;
+  return `<div class="row" role="button" tabindex="0" data-id="${esc(e.id)}"><i style="background:${t.color}"></i><span class="body"><div class="t">${esc(e.title)}</div><div class="d">${esc(detail)}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${side}</span></div>`;
 }
 
-// "Which card?" ranking: when the search matches a rule line on a card, rank cards by that percentage
 function renderBest(q){
   if(!q){ $("best").innerHTML=""; return; }
   const hits = [];
@@ -152,7 +160,6 @@ function renderBest(q){
   $("best").innerHTML = hits.length ? `<div class="best"><b>Best card for “${esc(q)}”</b><ol>${hits.map(h=>`<li>${esc(h.card)}: ${esc(h.line)}</li>`).join("")}</ol></div>` : "";
 }
 
-// ---- add / edit dialog
 function buildFields(type, data={}){
   $("dyn").innerHTML = TYPES[type].fields.map(([k,l,kind]) =>
     `<label for="d_${k}">${l}</label>` + (kind==="area" ? `<textarea id="d_${k}">${esc(data[k])}</textarea>` : `<input id="d_${k}" type="${kind}" value="${esc(data[k])}">`)
@@ -182,9 +189,13 @@ async function save(){
   catch(err){ alert("Could not save: "+err.message); }
 }
 
-// ---- events
-$("q").addEventListener("input", render);
+$("q").addEventListener("input", () => { showAll = false; render(); });
 $("add").onclick = () => openDlg();
+$("showAll").onclick = () => {
+  showAll = !showAll;
+  if(showAll){ $("q").value = ""; typeFilter = null; tagFilter = null; }
+  render();
+};
 $("cancel").onclick = () => $("dlg").close();
 $("save").onclick = save;
 $("f_type").onchange = () => buildFields($("f_type").value);
@@ -201,8 +212,8 @@ $("list").onclick = async ev => {
   const b = ev.target.closest(".row"); if(b) openDlg(entries.find(x=>x.id===b.dataset.id));
 };
 $("list").onkeydown = ev => { if(ev.key==="Enter" && ev.target.classList.contains("row")) openDlg(entries.find(x=>x.id===ev.target.dataset.id)); };
-$("types").onclick = ev => { const b = ev.target.closest("[data-type]"); if(b){ typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
-$("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
+$("types").onclick = ev => { const b = ev.target.closest("[data-type]"); if(b){ showAll = false; typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
+$("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ showAll = false; tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
 
 refresh();
 </script>
