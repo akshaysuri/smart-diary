@@ -156,10 +156,10 @@ function render(){
   const shown = base.filter(e => (!typeFilter||e.type===typeFilter) && (!tagFilter||(e.tags||[]).includes(tagFilter)) && (!q||q.split(/\s+/).every(w => text(e).includes(w))) && (showDone||!staleDone(e)));
   if(p==="tasks") shown.sort((a,b) => (a.data?.done?1:0)-(b.data?.done?1:0) || String(a.data?.due||"9999").localeCompare(String(b.data?.due||"9999")));
   renderStrips(p);
-  const showResults = p!=="home" || showAll || Boolean(q||typeFilter||tagFilter);
+  const showResults = showAll || Boolean(q||typeFilter||tagFilter);
   $("showAll").hidden = p!=="home"; $("showAll").textContent = showAll ? "Hide all" : "Show all"; $("showAll").setAttribute("aria-expanded", String(showAll));
   if(p==="home"||p==="cards") renderBest(q); else $("best").innerHTML = "";
-  $("list").innerHTML = !showResults ? "" : shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing here. Try fewer words, or add an entry." : "No entries yet. Tap “Add entry” to start."}</div>`;
+  $("list").innerHTML = !showResults ? (p==="home" ? "" : '<div class="empty">List hidden. Search, tap a filter, or press Show all on Home.</div>') : shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing here. Try fewer words, or add an entry." : "No entries yet. Tap “Add entry” to start."}</div>`;
 }
 
 function renderStrips(p){
@@ -275,7 +275,7 @@ $("strips").onclick = ev => { const b = ev.target.closest("[data-open]"); if(b) 
 $("types").onclick = ev => { if(ev.target.closest("[data-showdone]")){ showDone = !showDone; render(); return; } const b = ev.target.closest("[data-type]"); if(b){ showAll = false; typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
 $("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ showAll = false; tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
 
-window.addEventListener("hashchange", () => { typeFilter = null; tagFilter = null; showAll = false; $("q").value = ""; render(); window.scrollTo(0,0); });
+window.addEventListener("hashchange", () => { typeFilter = null; tagFilter = null; $("q").value = ""; render(); window.scrollTo(0,0); });
 
 /* EXPORT/IMPORT DISABLED until email login is added. Re-enable with the HTML buttons above.
 // ---- export / import
