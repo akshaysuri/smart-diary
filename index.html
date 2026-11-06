@@ -41,19 +41,37 @@ textarea{min-height:80px}
 .actions button{padding:10px 16px;font:inherit;border-radius:6px;border:1px solid var(--ink);background:#fff;cursor:pointer}
 .actions .primary{background:var(--ink);color:#fff}
 .actions .danger{margin-left:auto;color:#b42318;border-color:#b42318}
+input[type=checkbox]{width:auto}
+label.chk{display:flex;align-items:center;gap:8px;color:var(--ink)}
+nav{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 14px;border-bottom:1px solid var(--line)}
+nav a{padding:8px 12px;color:var(--ink);text-decoration:none;border-bottom:3px solid transparent;font-weight:500}
+nav a[aria-current=page]{border-color:var(--ink);font-weight:600}
+nav a:focus-visible,.row a:focus-visible,.linkbtn:focus-visible{outline:3px solid #7aa7ff;outline-offset:2px}
+.row a{color:#1d4ed8}
+.tick{width:26px;height:26px;cursor:pointer}
+.strip{background:var(--panel);border-left:5px solid #b42318;padding:10px 14px;border-radius:6px;margin:0 0 12px}
+.strip ul{margin:6px 0 0;padding-left:18px}
+.linkbtn{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--ink);text-decoration:underline;cursor:pointer;text-align:left}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+.tools button{padding:8px 14px;font:inherit;font-size:14px;border:1px solid var(--ink);border-radius:6px;background:#fff;cursor:pointer}
 @media (prefers-reduced-motion:no-preference){.row{transition:border-color .15s}.row:hover{border-color:var(--ink)}}
 </style>
 </head>
 <body>
 <main>
   <h1>Smart Diary</h1>
+  <nav id="nav" aria-label="Pages"></nav>
   <div id="notice"></div>
+  <div id="strips"></div>
   <input id="q" class="search" type="search" placeholder="Search tools, cards, contacts, items to sell…" autocomplete="off">
   <div class="chips" id="types" role="group" aria-label="Filter by type"></div>
   <div class="chips" id="tags" role="group" aria-label="Filter by tag"></div>
   <button type="button" class="show-all" id="showAll" aria-expanded="false">Show all</button>
   <div id="best"></div>
   <div id="list"></div>
+  <!-- EXPORT/IMPORT DISABLED until email login is added (re-enable together with the JS block at the bottom)
+  <div class="tools"><button id="expJson" type="button">Export JSON</button><button id="expCsv" type="button">Export CSV</button><button id="impBtn" type="button">Import JSON</button><input id="impFile" type="file" accept="application/json,.json" hidden></div>
+  -->
 </main>
 <button class="fab" id="add">+ Add entry</button>
 
@@ -80,10 +98,11 @@ const SUPABASE_URL = "https://retlrbrclqdrlovsmmve.supabase.co";
 const SUPABASE_KEY = "sb_publishable_rpDo0biiUme5uUAi7nw8tg_jZgiM0BN";
 
 const TYPES = {
-  tool:    {label:"Tool",    color:"var(--tool)",    fields:[["qty","Quantity","number"],["location","Where it is kept","text"],["notes","Notes","area"]]},
-  card:    {label:"Card",    color:"var(--card)",    fields:[["network","Card ID (last 4 digits only)","text"],["rules","Cashback rules, one per line (e.g. Amazon 5%)","area"],["notes","Notes","area"]]},
+  tool:    {label:"Tool",    color:"var(--tool)",    fields:[["qty","Quantity","number"],["location","Where it is kept","text"],["renews","Expires / renews on","date"],["notes","Notes","area"]]},
+  card:    {label:"Card",    color:"var(--card)",    fields:[["network","Card ID (last 4 digits only)","text"],["rules","Cashback rules, one per line (e.g. Amazon 5%)","area"],["renews","Expires / renews on","date"],["notes","Notes","area"]]},
   contact: {label:"Contact", color:"var(--contact)", fields:[["phone","Phone","tel"],["address","Address / area","text"],["notes","Notes","area"]]},
   waste:   {label:"To sell", color:"var(--waste)",   fields:[["qty","Quantity","number"],["location","Where it is kept","text"],["price","Asking price (₹)","number"],["notes","Notes","area"]]},
+  task:    {label:"Task",    color:"#9f1239",        fields:[["due","Due date","date"],["done","Done","check"],["notes","Notes","area"]]},
   note:    {label:"Note",    color:"var(--note)",    fields:[["notes","Details","area"]]}
 };
 const $ = id => document.getElementById(id);
@@ -116,6 +135,8 @@ const text = e => [e.title, (e.tags||[]).join(" "), Object.values(e.data||{}).jo
 
 function render(){
   if(!sb) $("notice").innerHTML = '<div class="notice">Local mode: data stays in this browser only. Add your Supabase details in index.html to sync across devices.</div>';
+  const p = curPage(), pt = PAGES[p].types || Object.keys(TYPES);
+  $("nav").innerHTML = Object.entries(PAGES).map(([k,v]) => `<a href="#${k}"${k===p?' aria-current="page"':""}>${v.label}</a>`).join("");
   const q = $("q").value.trim().toLowerCase();
   $("types").innerHTML = Object.entries(TYPES).map(([k,t]) => `<button class="chip" data-type="${k}" aria-pressed="${typeFilter===k}">${t.label}</button>`).join("");
   const tags = [...new Set(entries.flatMap(e => e.tags||[]))].sort();
@@ -137,7 +158,7 @@ function render(){
 }
 
 function row(e){
-  const t = TYPES[e.type] || TYPES.note, d = e.data || {};
+  const t = TYPES[e.type] || TYPES.note, d = e.data || {}, td = todayStr();
   const stepper = `<span class="stepper"><button type="button" class="step" data-d="-1" aria-label="Decrease quantity">−</button><span class="q">${esc(d.qty ?? 0)}</span><button type="button" class="step" data-d="1" aria-label="Increase quantity">+</button></span>`;
   let detail = "", side = "";
   if(e.type==="tool"){ side = stepper; detail = [d.location && "📍 "+d.location, d.notes].filter(Boolean).join("\n"); }
@@ -161,14 +182,15 @@ function renderBest(q){
 }
 
 function buildFields(type, data={}){
-  $("dyn").innerHTML = TYPES[type].fields.map(([k,l,kind]) =>
-    `<label for="d_${k}">${l}</label>` + (kind==="area" ? `<textarea id="d_${k}">${esc(data[k])}</textarea>` : `<input id="d_${k}" type="${kind}" value="${esc(data[k])}">`)
+  $("dyn").innerHTML = TYPES[type].fields.map(([k,l,kind]) => kind==="check"
+    ? `<label class="chk"><input id="d_${k}" type="checkbox"${data[k]?" checked":""}> ${l}</label>`
+    : `<label for="d_${k}">${l}</label>` + (kind==="area" ? `<textarea id="d_${k}">${esc(data[k])}</textarea>` : `<input id="d_${k}" type="${kind}" value="${esc(data[k])}">`)
   ).join("");
 }
 function openDlg(e){
   editing = e || null;
   $("f_type").innerHTML = Object.entries(TYPES).map(([k,t])=>`<option value="${k}">${t.label}</option>`).join("");
-  $("f_type").value = e ? e.type : (typeFilter || "tool");
+  const pt = PAGES[curPage()].types; $("f_type").value = e ? e.type : (typeFilter || (pt ? pt[0] : "tool"));
   $("f_title").value = e ? e.title : "";
   $("f_tags").value = e ? (e.tags||[]).join(", ") : (tagFilter || "");
   buildFields($("f_type").value, e ? e.data : {});
@@ -179,7 +201,8 @@ function openDlg(e){
 async function save(){
   if(!$("f_title").value.trim()){ $("f_title").focus(); return; }
   const type = $("f_type").value, data = {};
-  TYPES[type].fields.forEach(([k]) => { const v = $("d_"+k).value.trim(); if(v!=="") data[k] = v; });
+  TYPES[type].fields.forEach(([k,,kind]) => { const el = $("d_"+k); if(kind==="check"){ if(el.checked) data[k] = true; } else { const v = el.value.trim(); if(v!=="") data[k] = v; } });
+  if(type==="task" && data.done) data.doneAt = editing?.data?.doneAt || new Date().toISOString();
   const entry = {
     id: editing ? editing.id : crypto.randomUUID(), type, title: $("f_title").value.trim(), data,
     tags: $("f_tags").value.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean),
@@ -201,6 +224,16 @@ $("save").onclick = save;
 $("f_type").onchange = () => buildFields($("f_type").value);
 $("del").onclick = async () => { if(editing && confirm("Delete “"+editing.title+"”?")){ try{ await Store.remove(editing.id); $("dlg").close(); await refresh(); }catch(err){ alert("Could not delete: "+err.message); } } };
 $("list").onclick = async ev => {
+  if(ev.target.closest("a")) return;
+  const tk = ev.target.closest(".tick");
+  if(tk){
+    const e = entries.find(x=>x.id===tk.closest(".row").dataset.id); if(!e) return;
+    const nd = {...e.data};
+    if(!nd.done){ nd.done = true; nd.doneAt = new Date().toISOString(); } else { delete nd.done; delete nd.doneAt; }
+    e.data = nd; render();
+    try{ await Store.save(e); } catch(err){ alert("Could not save: "+err.message); refresh(); }
+    return;
+  }
   const st = ev.target.closest(".step");
   if(st){
     const e = entries.find(x=>x.id===st.closest(".row").dataset.id); if(!e) return;
@@ -215,6 +248,7 @@ $("list").onkeydown = ev => { if(ev.key==="Enter" && ev.target.classList.contain
 $("types").onclick = ev => { const b = ev.target.closest("[data-type]"); if(b){ showAll = false; typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
 $("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ showAll = false; tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
 
+*/
 refresh();
 </script>
 </body>
