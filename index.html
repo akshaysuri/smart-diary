@@ -21,17 +21,17 @@ h1{font-size:22px;margin:0 0 14px;font-weight:600}
 .best{background:var(--panel);border-left:5px solid var(--card);padding:10px 14px;border-radius:6px;margin:12px 0}
 .best b{font-weight:600}
 .best ol{margin:6px 0 0;padding-left:20px}
-.row{display:grid;grid-template-columns:6px 1fr auto;gap:12px;background:var(--panel);border-radius:8px;margin-bottom:8px;overflow:hidden;cursor:pointer;border:1px solid var(--line);width:100%;text-align:left;font:inherit;color:inherit;padding:0}
+.row{display:grid;grid-template-columns:6px 1fr auto;gap:12px;background:var(--panel);border-radius:8px;margin-bottom:8px;overflow:hidden;cursor:pointer;border:1px solid var(--line);width:100%;text-align:left;color:inherit;font:inherit}
 .row>i{display:block}
 .row .body{padding:10px 0}
 .row .t{font-weight:600}
 .row .d{color:var(--mute);font-size:14px;white-space:pre-line}
 .row .tags{font-size:13px;color:var(--mute);margin-top:2px}
 .row .side{padding:10px 14px;font-weight:600;font-size:20px;align-self:center}
-.stepper{display:flex;align-items:center;gap:6px}.step{width:38px;height:38px;border-radius:50%;border:1px solid var(--ink);background:#fff;font:inherit;font-size:20px;line-height:1;cursor:pointer;padding:0;color:var(--ink)}.step:active{background:var(--line)}.q{min-width:26px;text-align:center}
+.stepper{display:flex;align-items:center;gap:6px}.step{width:38px;height:38px;border-radius:50%;border:1px solid var(--ink);background:#fff;font:inherit;font-size:20px;line-height:1;cursor:pointer}
 .empty{color:var(--mute);padding:30px 0;text-align:center}
 .notice{background:#fff7e0;border:1px solid #e8c766;padding:8px 12px;border-radius:6px;font-size:14px;margin-bottom:12px}
-.fab{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:14px 22px;font:inherit;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.fab{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:14px 22px;font:inherit;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2)}
 dialog{border:0;border-radius:10px;padding:20px;width:min(480px,94vw);max-height:92vh}
 dialog::backdrop{background:rgba(20,30,30,.5)}
 label{display:block;font-size:14px;color:var(--mute);margin:12px 0 4px}
@@ -94,7 +94,6 @@ nav a:focus-visible,.row a:focus-visible,.linkbtn:focus-visible{outline:3px soli
 </dialog>
 
 <script>
-// ---- 1. Paste your Supabase details here (see setup steps). Leave blank to try the app with local-only storage.
 const SUPABASE_URL = "https://retlrbrclqdrlovsmmve.supabase.co";
 const SUPABASE_KEY = "sb_publishable_rpDo0biiUme5uUAi7nw8tg_jZgiM0BN";
 
@@ -108,16 +107,8 @@ const TYPES = {
 };
 const $ = id => document.getElementById(id);
 const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-let entries = [], typeFilter = null, tagFilter = null, editing = null, showDone = false, showAll = false;
-const PAGES = {home:{label:"Home",types:null}, items:{label:"Items",types:["tool","waste"]}, cards:{label:"Cards",types:["card"]}, contacts:{label:"Contacts",types:["contact"]}, tasks:{label:"Tasks",types:["task"]}};
-const curPage = () => { const h=(location.hash||"").replace("#",""); return PAGES[h] ? h : "home"; };
-const pad = n => String(n).padStart(2,"0");
-const ymd = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
-const todayStr = () => ymd(new Date());
-const inDays = n => { const d=new Date(); d.setDate(d.getDate()+n); return ymd(d); };
-const staleDone = e => e.type==="task" && e.data?.done && e.data?.doneAt && (Date.now()-new Date(e.data.doneAt).getTime() > 864e5);
+let entries = [], typeFilter = null, tagFilter = null, editing = null, showAll = false;
 
-// ---- storage: Supabase when configured, else this browser only
 const Store = {
   async load(){
     if(sb){ const {data,error} = await sb.from("entries").select("*").order("created_at",{ascending:false}); if(error) throw error; return data; }
@@ -139,7 +130,7 @@ async function refresh(){
   catch(err){ $("notice").innerHTML = '<div class="notice">Could not load data: '+esc(err.message)+'. Check your Supabase URL, key and table setup.</div>'; return; }
   render();
 }
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => String(s ?? "").replace(/[&<>\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const text = e => [e.title, (e.tags||[]).join(" "), Object.values(e.data||{}).join(" ")].join(" ").toLowerCase();
 
 function render(){
@@ -147,56 +138,37 @@ function render(){
   const p = curPage(), pt = PAGES[p].types || Object.keys(TYPES);
   $("nav").innerHTML = Object.entries(PAGES).map(([k,v]) => `<a href="#${k}"${k===p?' aria-current="page"':""}>${v.label}</a>`).join("");
   const q = $("q").value.trim().toLowerCase();
-  const base = entries.filter(e => pt.includes(e.type));
-  let chips = pt.length>1 ? pt.map(k => `<button class="chip" data-type="${k}" aria-pressed="${typeFilter===k}">${TYPES[k].label}</button>`).join("") : "";
-  if(p==="tasks") chips = `<button class="chip" data-showdone="1" aria-pressed="${showDone}">Show completed</button>`;
-  $("types").innerHTML = chips;
-  const tags = [...new Set(base.flatMap(e => e.tags||[]))].sort();
+  $("types").innerHTML = Object.entries(TYPES).map(([k,t]) => `<button class="chip" data-type="${k}" aria-pressed="${typeFilter===k}">${t.label}</button>`).join("");
+  const tags = [...new Set(entries.flatMap(e => e.tags||[]))].sort();
   $("tags").innerHTML = tags.map(t => `<button class="chip" data-tag="${esc(t)}" aria-pressed="${tagFilter===t}">#${esc(t)}</button>`).join("");
-  const shown = base.filter(e => (!typeFilter||e.type===typeFilter) && (!tagFilter||(e.tags||[]).includes(tagFilter)) && (!q||q.split(/\s+/).every(w => text(e).includes(w))) && (showDone||!staleDone(e)));
-  if(p==="tasks") shown.sort((a,b) => (a.data?.done?1:0)-(b.data?.done?1:0) || String(a.data?.due||"9999").localeCompare(String(b.data?.due||"9999")));
-  renderStrips(p);
-  const showResults = p!=="home" || showAll || Boolean(q||typeFilter||tagFilter);
-  $("showAll").hidden = p!=="home"; $("showAll").textContent = showAll ? "Hide all" : "Show all"; $("showAll").setAttribute("aria-expanded", String(showAll));
-  if(p==="home"||p==="cards") renderBest(q); else $("best").innerHTML = "";
-  $("list").innerHTML = !showResults ? "" : shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing here. Try fewer words, or add an entry." : "No entries yet. Tap “Add entry” to start."}</div>`;
-}
 
-function renderStrips(p){
-  if(p!=="home"){ $("strips").innerHTML = ""; return; }
-  const t = todayStr(), lim = inDays(30);
-  const due = entries.filter(e => e.type==="task" && !e.data?.done && e.data?.due && e.data.due<=t).sort((a,b) => a.data.due.localeCompare(b.data.due));
-  const ren = entries.filter(e => e.data?.renews && e.data.renews<=lim).sort((a,b) => a.data.renews.localeCompare(b.data.renews));
-  const li = (e,label) => `<li><button class="linkbtn" data-open="${e.id}">${esc(e.title)}</button> <span>${label}</span></li>`;
-  let h = "";
-  if(due.length) h += `<div class="strip"><b>Due today / overdue</b><ul>${due.map(e => li(e, e.data.due<t ? "⚠ overdue since "+esc(e.data.due) : "due today")).join("")}</ul></div>`;
-  if(ren.length) h += `<div class="strip"><b>Coming up (next 30 days)</b><ul>${ren.map(e => li(e, e.data.renews<t ? "⚠ expired "+esc(e.data.renews) : "on "+esc(e.data.renews))).join("")}</ul></div>`;
-  $("strips").innerHTML = h;
+  const hasCriteria = Boolean(q || typeFilter || tagFilter);
+  const showResults = showAll || hasCriteria;
+  const shown = entries.filter(e => {
+    if(!showAll && (typeFilter && e.type !== typeFilter)) return false;
+    if(!showAll && tagFilter && !(e.tags||[]).includes(tagFilter)) return false;
+    if(!showAll && q && !q.split(/\s+/).every(w => text(e).includes(w))) return false;
+    return true;
+  });
+  $("showAll").textContent = showAll ? "Hide all" : "Show all";
+  $("showAll").setAttribute("aria-expanded", String(showAll));
+  renderBest(q);
+  if(!showResults){ $("list").innerHTML = ""; return; }
+  $("list").innerHTML = shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing matches. Try fewer words." : "No entries yet. Tap “Add entry” to start."}</div>`;
 }
 
 function row(e){
   const t = TYPES[e.type] || TYPES.note, d = e.data || {}, td = todayStr();
   const stepper = `<span class="stepper"><button type="button" class="step" data-d="-1" aria-label="Decrease quantity">−</button><span class="q">${esc(d.qty ?? 0)}</span><button type="button" class="step" data-d="1" aria-label="Increase quantity">+</button></span>`;
-  const ren = d.renews ? esc("🔁 "+(d.renews<td ? "Expired " : "Renews ")+d.renews) : "";
-  const L = []; let side = "";
-  if(e.type==="tool"){ side = stepper; L.push(d.location && esc("📍 "+d.location), ren, esc(d.notes||"")); }
-  else if(e.type==="waste"){ side = stepper; L.push(d.location && esc("📍 "+d.location), d.price && esc("Asking ₹"+d.price), esc(d.notes||"")); }
-  else if(e.type==="card"){ L.push(d.network && esc("Card "+d.network), esc(d.rules||""), ren, esc(d.notes||"")); }
-  else if(e.type==="contact"){
-    const phones = String(d.phone||"").split(/[,;/]+/).map(s=>s.trim()).filter(Boolean).map(s => `<a href="tel:${esc(s.replace(/[^\d+]/g,""))}">${esc(s)}</a>`).join(", ");
-    const addr = d.address ? `<a href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(d.address)}" target="_blank" rel="noopener">📍 ${esc(d.address)}</a>` : "";
-    L.push(phones, addr, esc(d.notes||""));
-  }
-  else if(e.type==="task"){
-    side = `<input type="checkbox" class="tick" aria-label="Mark ${esc(e.title)} done"${d.done?" checked":""}>`;
-    L.push(d.due && esc((!d.done && d.due<td ? "⚠ Overdue · " : "Due ")+d.due), esc(d.notes||""));
-  }
-  else L.push(esc(d.notes||""));
-  const strike = e.type==="task" && d.done ? ' style="text-decoration:line-through"' : "";
-  return `<div class="row" role="button" tabindex="0" data-id="${e.id}"><i style="background:${t.color}"></i><span class="body"><div class="t"${strike}>${esc(e.title)}</div><div class="d">${L.filter(Boolean).join("\n")}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${side}</span></div>`;
+  let detail = "", side = "";
+  if(e.type==="tool"){ side = stepper; detail = [d.location && "📍 "+d.location, d.notes].filter(Boolean).join("\n"); }
+  else if(e.type==="waste"){ side = stepper; detail = [d.location && "📍 "+d.location, d.price && "Asking ₹"+d.price, d.notes].filter(Boolean).join("\n"); }
+  else if(e.type==="card"){ detail = [d.network && "Card "+d.network, d.rules].filter(Boolean).join("\n"); }
+  else if(e.type==="contact"){ detail = [d.phone, d.address, d.notes].filter(Boolean).join("\n"); }
+  else detail = d.notes || "";
+  return `<div class="row" role="button" tabindex="0" data-id="${esc(e.id)}"><i style="background:${t.color}"></i><span class="body"><div class="t">${esc(e.title)}</div><div class="d">${esc(detail)}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${side}</span></div>`;
 }
 
-// "Which card?" ranking: when the search matches a rule line on a card, rank cards by that percentage
 function renderBest(q){
   if(!q){ $("best").innerHTML=""; return; }
   const hits = [];
@@ -209,7 +181,6 @@ function renderBest(q){
   $("best").innerHTML = hits.length ? `<div class="best"><b>Best card for “${esc(q)}”</b><ol>${hits.map(h=>`<li>${esc(h.card)}: ${esc(h.line)}</li>`).join("")}</ol></div>` : "";
 }
 
-// ---- add / edit dialog
 function buildFields(type, data={}){
   $("dyn").innerHTML = TYPES[type].fields.map(([k,l,kind]) => kind==="check"
     ? `<label class="chk"><input id="d_${k}" type="checkbox"${data[k]?" checked":""}> ${l}</label>`
@@ -241,10 +212,13 @@ async function save(){
   catch(err){ alert("Could not save: "+err.message); }
 }
 
-// ---- events
 $("q").addEventListener("input", () => { showAll = false; render(); });
 $("add").onclick = () => openDlg();
-$("showAll").onclick = () => { showAll = !showAll; if(showAll){ $("q").value = ""; typeFilter = null; tagFilter = null; } render(); };
+$("showAll").onclick = () => {
+  showAll = !showAll;
+  if(showAll){ $("q").value = ""; typeFilter = null; tagFilter = null; }
+  render();
+};
 $("cancel").onclick = () => $("dlg").close();
 $("save").onclick = save;
 $("f_type").onchange = () => buildFields($("f_type").value);
@@ -271,34 +245,8 @@ $("list").onclick = async ev => {
   const b = ev.target.closest(".row"); if(b) openDlg(entries.find(x=>x.id===b.dataset.id));
 };
 $("list").onkeydown = ev => { if(ev.key==="Enter" && ev.target.classList.contains("row")) openDlg(entries.find(x=>x.id===ev.target.dataset.id)); };
-$("strips").onclick = ev => { const b = ev.target.closest("[data-open]"); if(b) openDlg(entries.find(x=>x.id===b.dataset.open)); };
-$("types").onclick = ev => { if(ev.target.closest("[data-showdone]")){ showDone = !showDone; render(); return; } const b = ev.target.closest("[data-type]"); if(b){ showAll = false; typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
+$("types").onclick = ev => { const b = ev.target.closest("[data-type]"); if(b){ showAll = false; typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
 $("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ showAll = false; tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
-
-window.addEventListener("hashchange", () => { typeFilter = null; tagFilter = null; showAll = false; $("q").value = ""; render(); window.scrollTo(0,0); });
-
-/* EXPORT/IMPORT DISABLED until email login is added. Re-enable with the HTML buttons above.
-// ---- export / import
-function dl(name, mime, content){ const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([content],{type:mime})); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
-$("expJson").onclick = () => dl(`smart-diary-${todayStr()}.json`, "application/json", JSON.stringify(entries.map(({id,type,title,tags,data,created_at}) => ({id,type,title,tags,data,created_at})), null, 2));
-$("expCsv").onclick = () => {
-  const keys = [...new Set(entries.flatMap(e => Object.keys(e.data||{})))], cols = ["type","title","tags","created_at", ...keys];
-  const c = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
-  const val = (e,k) => k==="tags" ? (e.tags||[]).join("; ") : (["type","title","created_at"].includes(k) ? e[k] : (e.data||{})[k]);
-  const rows = [cols.map(c).join(",")].concat(entries.map(e => cols.map(k => c(val(e,k))).join(",")));
-  dl(`smart-diary-${todayStr()}.csv`, "text/csv;charset=utf-8", "\ufeff" + rows.join("\r\n"));
-};
-$("impBtn").onclick = () => $("impFile").click();
-$("impFile").onchange = async ev => {
-  const f = ev.target.files[0]; ev.target.value = ""; if(!f) return;
-  try{
-    const arr = JSON.parse(await f.text()); if(!Array.isArray(arr)) throw new Error("Expected a JSON list of entries");
-    const ok = arr.filter(x => x && x.id && x.type && x.title);
-    if(!ok.length || !confirm("Import "+ok.length+" entries? Entries with the same id will be overwritten.")) return;
-    for(const x of ok) await Store.save({id:x.id, type:x.type, title:x.title, tags:x.tags||[], data:x.data||{}, created_at:x.created_at||new Date().toISOString()});
-    await refresh(); alert("Imported "+ok.length+" entries.");
-  } catch(err){ alert("Import failed: "+err.message); }
-};
 
 */
 refresh();
