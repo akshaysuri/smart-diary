@@ -103,18 +103,42 @@ const TYPES = {
   card:    {label:"Card",    color:"var(--card)",    fields:[["network","Card ID (last 4 digits only)","text"],["rules","Cashback rules, one per line (e.g. Amazon 5%)","area"],["renews","Expires / renews on","date"],["notes","Notes","area"]]},
   contact: {label:"Contact", color:"var(--contact)", fields:[["phone","Phone","tel"],["address","Address / area","text"],["notes","Notes","area"]]},
   waste:   {label:"To sell", color:"var(--waste)",   fields:[["qty","Quantity","number"],["location","Where it is kept","text"],["price","Asking price (₹)","number"],["notes","Notes","area"]]},
-  task:    {label:"Task",    color:"#9f1239",        fields:[["due","Due date","date"],["done","Done","check"],["notes","Notes","area"]]},
+  task:    {label:"Reminder", color:"#9f1239",       fields:[
+    ["kind","Kind","select",[["todo","To-do"],["birthday","Birthday / anniversary"],["monthly","Monthly payment (card, utilities)"],["annual","Annual payment (insurance, subscription)"]]],
+    ["due","Date (for birthdays: the original date)","date"],
+    ["repeat","Repeats","select",[["none","Doesn’t repeat"],["weekly","Weekly"],["monthly","Monthly"],["quarterly","Quarterly"],["yearly","Yearly"]]],
+    ["lead","Remind me this many days before","number"],
+    ["pay","Pay with (optional, e.g. which card)","text"],
+    ["done","Done (closes it)","check"],["notes","Notes","area"]]},
   note:    {label:"Note",    color:"var(--note)",    fields:[["notes","Details","area"]]}
 };
 const $ = id => document.getElementById(id);
 const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-let entries = [], typeFilter = null, tagFilter = null, editing = null, showDone = false, showAll = false;
-const PAGES = {home:{label:"Home",types:null}, items:{label:"Items",types:["tool","waste"]}, cards:{label:"Cards",types:["card"]}, contacts:{label:"Contacts",types:["contact"]}, tasks:{label:"Tasks",types:["task"]}};
+let entries = [], typeFilter = null, tagFilter = null, editing = null, showDone = false, showAll = false, kindFilter = null;
+const PAGES = {home:{label:"Home",types:null}, items:{label:"Items",types:["tool","waste"]}, cards:{label:"Cards",types:["card"]}, contacts:{label:"Contacts",types:["contact"]}, tasks:{label:"Reminders",types:["task"]}};
 const curPage = () => { const h=(location.hash||"").replace("#",""); return PAGES[h] ? h : "home"; };
 const pad = n => String(n).padStart(2,"0");
 const ymd = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
 const todayStr = () => ymd(new Date());
 const inDays = n => { const d=new Date(); d.setDate(d.getDate()+n); return ymd(d); };
+const KIND_DEF = {todo:{repeat:"none",lead:0}, birthday:{repeat:"yearly",lead:7}, monthly:{repeat:"monthly",lead:5}, annual:{repeat:"yearly",lead:30}};
+const KIND_ICON = {todo:"☑", birthday:"🎂", monthly:"💳", annual:"📅"};
+const KIND_LABEL = {todo:"To-do", birthday:"Birthdays", monthly:"Monthly", annual:"Annual"};
+const kindOf = e => e.data?.kind || "todo";
+const dim = (y,m) => new Date(y,m+1,0).getDate();
+const fmtD = (y,m,d) => y+"-"+pad(m+1)+"-"+pad(Math.min(d,dim(y,m)));
+const parseD = s => String(s).split("-").map(Number);
+function addPeriod(s, rep, anchor){
+  const [y,m,d] = parseD(s);
+  if(rep==="weekly") return ymd(new Date(y,m-1,d+7));
+  const t = (m-1) + (rep==="monthly" ? 1 : rep==="quarterly" ? 3 : 12);
+  return fmtD(y+Math.floor(t/12), t%12, anchor||d);
+}
+function nextBirthday(s){ const [,m,d] = parseD(s), td = todayStr(), ty = +td.slice(0,4); let c = fmtD(ty,m-1,d); if(c<td) c = fmtD(ty+1,m-1,d); return c; }
+const occ = e => { const due = e.data?.due; if(!due) return ""; return kindOf(e)==="birthday" ? nextBirthday(due) : due; };
+const daysTo = s => { const [y,m,d] = parseD(s), [ty,tm,td] = parseD(todayStr()); return Math.round((new Date(y,m-1,d) - new Date(ty,tm-1,td))/864e5); };
+const whenTxt = n => n<0 ? "⚠ overdue by "+(-n)+(n===-1?" day":" days") : n===0 ? "today" : n===1 ? "tomorrow" : "in "+n+" days";
+const yearsTxt = e => { if(kindOf(e)!=="birthday") return ""; const y0 = +String(e.data.due).slice(0,4), n = +occ(e).slice(0,4)-y0; return y0>=1900 && n>0 ? " · "+n+" years" : ""; };
 const staleDone = e => e.type==="task" && e.data?.done && e.data?.doneAt && (Date.now()-new Date(e.data.doneAt).getTime() > 864e5);
 
 // ---- storage: Supabase when configured, else this browser only
@@ -149,12 +173,12 @@ function render(){
   const q = $("q").value.trim().toLowerCase();
   const base = entries.filter(e => pt.includes(e.type));
   let chips = pt.length>1 ? pt.map(k => `<button class="chip" data-type="${k}" aria-pressed="${typeFilter===k}">${TYPES[k].label}</button>`).join("") : "";
-  if(p==="tasks") chips = `<button class="chip" data-showdone="1" aria-pressed="${showDone}">Show completed</button>`;
+  if(p==="tasks") chips = Object.keys(KIND_LABEL).map(k => `<button class="chip" data-kind="${k}" aria-pressed="${kindFilter===k}">${KIND_ICON[k]} ${KIND_LABEL[k]}</button>`).join("") + `<button class="chip" data-showdone="1" aria-pressed="${showDone}">Show completed</button>`;
   $("types").innerHTML = chips;
   const tags = [...new Set(base.flatMap(e => e.tags||[]))].sort();
   $("tags").innerHTML = tags.map(t => `<button class="chip" data-tag="${esc(t)}" aria-pressed="${tagFilter===t}">#${esc(t)}</button>`).join("");
-  const shown = base.filter(e => (!typeFilter||e.type===typeFilter) && (!tagFilter||(e.tags||[]).includes(tagFilter)) && (!q||q.split(/\s+/).every(w => text(e).includes(w))) && (showDone||!staleDone(e)));
-  if(p==="tasks") shown.sort((a,b) => (a.data?.done?1:0)-(b.data?.done?1:0) || String(a.data?.due||"9999").localeCompare(String(b.data?.due||"9999")));
+  const shown = base.filter(e => (!typeFilter||e.type===typeFilter) && (!tagFilter||(e.tags||[]).includes(tagFilter)) && (!q||q.split(/\s+/).every(w => text(e).includes(w))) && (!kindFilter || e.type!=="task" || kindOf(e)===kindFilter) && (showDone||!staleDone(e)));
+  if(p==="tasks") shown.sort((a,b) => (a.data?.done?1:0)-(b.data?.done?1:0) || (occ(a)||"9999").localeCompare(occ(b)||"9999"));
   renderStrips(p);
   const showResults = showAll || Boolean(q||typeFilter||tagFilter);
   $("showAll").hidden = p!=="home"; $("showAll").textContent = showAll ? "Hide all" : "Show all"; $("showAll").setAttribute("aria-expanded", String(showAll));
@@ -165,12 +189,13 @@ function render(){
 function renderStrips(p){
   if(p!=="home"){ $("strips").innerHTML = ""; return; }
   const t = todayStr(), lim = inDays(30);
-  const due = entries.filter(e => e.type==="task" && !e.data?.done && e.data?.due && e.data.due<=t).sort((a,b) => a.data.due.localeCompare(b.data.due));
+  const rem = entries.filter(e => e.type==="task" && !e.data?.done && e.data?.due).map(e => ({e, n: daysTo(occ(e))}))
+    .filter(x => x.n <= Math.max(0, parseInt(x.e.data.lead,10)||0)).sort((a,b) => a.n-b.n);
   const ren = entries.filter(e => e.data?.renews && e.data.renews<=lim).sort((a,b) => a.data.renews.localeCompare(b.data.renews));
   const li = (e,label) => `<li><button class="linkbtn" data-open="${e.id}">${esc(e.title)}</button> <span>${label}</span></li>`;
   let h = "";
-  if(due.length) h += `<div class="strip"><b>Due today / overdue</b><ul>${due.map(e => li(e, e.data.due<t ? "⚠ overdue since "+esc(e.data.due) : "due today")).join("")}</ul></div>`;
-  if(ren.length) h += `<div class="strip"><b>Coming up (next 30 days)</b><ul>${ren.map(e => li(e, e.data.renews<t ? "⚠ expired "+esc(e.data.renews) : "on "+esc(e.data.renews))).join("")}</ul></div>`;
+  if(rem.length) h += `<div class="strip"><b>Reminders</b><ul>${rem.map(x => li(x.e, KIND_ICON[kindOf(x.e)]+" "+whenTxt(x.n)+yearsTxt(x.e))).join("")}</ul></div>`;
+  if(ren.length) h += `<div class="strip"><b>Renewals (next 30 days)</b><ul>${ren.map(e => li(e, e.data.renews<t ? "⚠ expired "+esc(e.data.renews) : "on "+esc(e.data.renews))).join("")}</ul></div>`;
   $("strips").innerHTML = h;
 }
 
@@ -188,8 +213,10 @@ function row(e){
     L.push(phones, addr, esc(d.notes||""));
   }
   else if(e.type==="task"){
-    side = `<input type="checkbox" class="tick" aria-label="Mark ${esc(e.title)} done"${d.done?" checked":""}>`;
-    L.push(d.due && esc((!d.done && d.due<td ? "⚠ Overdue · " : "Due ")+d.due), esc(d.notes||""));
+    const kind = kindOf(e), rep = d.repeat || "none", o = occ(e);
+    if(kind!=="birthday") side = `<input type="checkbox" class="tick" aria-label="Mark ${esc(e.title)} done"${d.done?" checked":""}>`;
+    const when = o ? (d.done ? "Done" : (kind==="birthday" ? "Next: " : "Due ")+o+" · "+whenTxt(daysTo(o))+yearsTxt(e)) : "";
+    L.push(esc(KIND_ICON[kind]+" "+when+(rep!=="none" && kind!=="birthday" ? " · repeats "+rep : "")), d.pay && esc("Pay with: "+d.pay), esc(d.notes||""));
   }
   else L.push(esc(d.notes||""));
   const strike = e.type==="task" && d.done ? ' style="text-decoration:line-through"' : "";
@@ -211,10 +238,17 @@ function renderBest(q){
 
 // ---- add / edit dialog
 function buildFields(type, data={}){
-  $("dyn").innerHTML = TYPES[type].fields.map(([k,l,kind]) => kind==="check"
-    ? `<label class="chk"><input id="d_${k}" type="checkbox"${data[k]?" checked":""}> ${l}</label>`
-    : `<label for="d_${k}">${l}</label>` + (kind==="area" ? `<textarea id="d_${k}">${esc(data[k])}</textarea>` : `<input id="d_${k}" type="${kind}" value="${esc(data[k])}">`)
-  ).join("");
+  $("dyn").innerHTML = TYPES[type].fields.map(([k,l,kind,opts]) => {
+    if(kind==="check") return `<label class="chk"><input id="d_${k}" type="checkbox"${data[k]?" checked":""}> ${l}</label>`;
+    if(kind==="select") return `<label for="d_${k}">${l}</label><select id="d_${k}">${opts.map(([v,t]) => `<option value="${v}"${(data[k]||opts[0][0])===v?" selected":""}>${t}</option>`).join("")}</select>`;
+    return `<label for="d_${k}">${l}</label>` + (kind==="area" ? `<textarea id="d_${k}">${esc(data[k])}</textarea>` : `<input id="d_${k}" type="${kind}" value="${esc(data[k])}">`);
+  }).join("");
+  const kd = $("d_kind");
+  if(kd){
+    const apply = () => { const df = KIND_DEF[kd.value]; $("d_repeat").value = df.repeat; $("d_lead").value = df.lead; };
+    kd.onchange = apply;
+    if(!data.kind && !data.repeat) apply();
+  }
 }
 function openDlg(e){
   editing = e || null;
@@ -232,6 +266,7 @@ async function save(){
   const type = $("f_type").value, data = {};
   TYPES[type].fields.forEach(([k,,kind]) => { const el = $("d_"+k); if(kind==="check"){ if(el.checked) data[k] = true; } else { const v = el.value.trim(); if(v!=="") data[k] = v; } });
   if(type==="task" && data.done) data.doneAt = editing?.data?.doneAt || new Date().toISOString();
+  if(type==="task" && data.due && ["monthly","quarterly","yearly"].includes(data.repeat)) data.anchor = +data.due.slice(8,10);
   const entry = {
     id: editing ? editing.id : crypto.randomUUID(), type, title: $("f_title").value.trim(), data,
     tags: $("f_tags").value.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean),
@@ -255,7 +290,10 @@ $("list").onclick = async ev => {
   if(tk){
     const e = entries.find(x=>x.id===tk.closest(".row").dataset.id); if(!e) return;
     const nd = {...e.data};
-    if(!nd.done){ nd.done = true; nd.doneAt = new Date().toISOString(); } else { delete nd.done; delete nd.doneAt; }
+    const rep = nd.repeat || "none";
+    if(rep!=="none" && nd.due){ nd.due = addPeriod(nd.due, rep, nd.anchor); }
+    else if(!nd.done){ nd.done = true; nd.doneAt = new Date().toISOString(); }
+    else { delete nd.done; delete nd.doneAt; }
     e.data = nd; render();
     try{ await Store.save(e); } catch(err){ alert("Could not save: "+err.message); refresh(); }
     return;
@@ -272,10 +310,11 @@ $("list").onclick = async ev => {
 };
 $("list").onkeydown = ev => { if(ev.key==="Enter" && ev.target.classList.contains("row")) openDlg(entries.find(x=>x.id===ev.target.dataset.id)); };
 $("strips").onclick = ev => { const b = ev.target.closest("[data-open]"); if(b) openDlg(entries.find(x=>x.id===b.dataset.open)); };
-$("types").onclick = ev => { if(ev.target.closest("[data-showdone]")){ showDone = !showDone; render(); return; } const b = ev.target.closest("[data-type]"); if(b){ showAll = false; typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
+$("types").onclick = ev => { const kb = ev.target.closest("[data-kind]"); if(kb){ showAll = false; kindFilter = kindFilter===kb.dataset.kind ? null : kb.dataset.kind; render(); return; }
+  if(ev.target.closest("[data-showdone]")){ showDone = !showDone; render(); return; } const b = ev.target.closest("[data-type]"); if(b){ showAll = false; typeFilter = typeFilter===b.dataset.type ? null : b.dataset.type; render(); } };
 $("tags").onclick = ev => { const b = ev.target.closest("[data-tag]"); if(b){ showAll = false; tagFilter = tagFilter===b.dataset.tag ? null : b.dataset.tag; render(); } };
 
-window.addEventListener("hashchange", () => { typeFilter = null; tagFilter = null; $("q").value = ""; render(); window.scrollTo(0,0); });
+window.addEventListener("hashchange", () => { typeFilter = null; tagFilter = null; kindFilter = null; $("q").value = ""; render(); window.scrollTo(0,0); });
 
 /* EXPORT/IMPORT DISABLED until email login is added. Re-enable with the HTML buttons above.
 // ---- export / import
