@@ -54,6 +54,7 @@ nav a:focus-visible,.row a:focus-visible,.linkbtn:focus-visible{outline:3px soli
 .linkbtn{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--ink);text-decoration:underline;cursor:pointer;text-align:left}
 .tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
 .tools button{padding:8px 14px;font:inherit;font-size:14px;border:1px solid var(--ink);border-radius:6px;background:#fff;cursor:pointer}
+.stamps{font-size:13px;color:var(--mute);margin:14px 0 0}
 @media (prefers-reduced-motion:no-preference){.row{transition:border-color .15s}.row:hover{border-color:var(--ink)}}
 </style>
 </head>
@@ -85,6 +86,7 @@ nav a:focus-visible,.row a:focus-visible,.linkbtn:focus-visible{outline:3px soli
     <div id="dyn"></div>
     <label for="f_tags">Tags (comma separated, e.g. gardening, plumbing)</label>
     <input id="f_tags">
+    <p id="stamps" class="stamps" hidden></p>
     <div class="actions">
       <button class="primary" id="save">Save</button>
       <button id="cancel" type="button">Cancel</button>
@@ -139,6 +141,7 @@ const occ = e => { const due = e.data?.due; if(!due) return ""; return kindOf(e)
 const daysTo = s => { const [y,m,d] = parseD(s), [ty,tm,td] = parseD(todayStr()); return Math.round((new Date(y,m-1,d) - new Date(ty,tm-1,td))/864e5); };
 const whenTxt = n => n<0 ? "⚠ overdue by "+(-n)+(n===-1?" day":" days") : n===0 ? "today" : n===1 ? "tomorrow" : "in "+n+" days";
 const yearsTxt = e => { if(kindOf(e)!=="birthday") return ""; const y0 = +String(e.data.due).slice(0,4), n = +occ(e).slice(0,4)-y0; return y0>=1900 && n>0 ? " · "+n+" years" : ""; };
+const fmtStamp = s => s ? new Date(s).toLocaleString(undefined,{dateStyle:"medium",timeStyle:"short"}) : "not recorded";
 const staleDone = e => e.type==="task" && e.data?.done && e.data?.doneAt && (Date.now()-new Date(e.data.doneAt).getTime() > 864e5);
 
 // ---- storage: Supabase when configured, else this browser only
@@ -164,7 +167,7 @@ async function refresh(){
   render();
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const text = e => [e.title, (e.tags||[]).join(" "), Object.values(e.data||{}).join(" ")].join(" ").toLowerCase();
+const text = e => [e.title, (e.tags||[]).join(" "), Object.entries(e.data||{}).filter(([k]) => k[0]!=="_").map(([,v]) => v).join(" ")].join(" ").toLowerCase();
 
 function render(){
   if(!sb) $("notice").innerHTML = '<div class="notice">Local mode: data stays in this browser only. Add your Supabase details in index.html to sync across devices.</div>';
@@ -181,9 +184,9 @@ function render(){
   if(p==="tasks") shown.sort((a,b) => (a.data?.done?1:0)-(b.data?.done?1:0) || (occ(a)||"9999").localeCompare(occ(b)||"9999"));
   renderStrips(p);
   const showResults = showAll || Boolean(q||typeFilter||tagFilter);
-  $("showAll").hidden = p!=="home"; $("showAll").textContent = showAll ? "Hide all" : "Show all"; $("showAll").setAttribute("aria-expanded", String(showAll));
+  $("showAll").textContent = showAll ? "Hide all" : "Show all"; $("showAll").setAttribute("aria-expanded", String(showAll));
   if(p==="home"||p==="cards") renderBest(q); else $("best").innerHTML = "";
-  $("list").innerHTML = !showResults ? (p==="home" ? "" : '<div class="empty">List hidden. Search, tap a filter, or press Show all on Home.</div>') : shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing here. Try fewer words, or add an entry." : "No entries yet. Tap “Add entry” to start."}</div>`;
+  $("list").innerHTML = !showResults ? (p==="home" ? "" : '<div class="empty">List hidden. Search, tap a filter, or press Show all.</div>') : shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing here. Try fewer words, or add an entry." : "No entries yet. Tap “Add entry” to start."}</div>`;
 }
 
 function renderStrips(p){
@@ -259,6 +262,7 @@ function openDlg(e){
   buildFields($("f_type").value, e ? e.data : {});
   $("dlgTitle").textContent = e ? "Edit entry" : "Add entry";
   $("del").hidden = !e;
+  $("stamps").hidden = !e; if(e) $("stamps").textContent = "Created "+fmtStamp(e.created_at)+" · Last modified "+fmtStamp(e.data?._updated);
   $("dlg").showModal(); $("f_title").focus();
 }
 async function save(){
@@ -267,6 +271,7 @@ async function save(){
   TYPES[type].fields.forEach(([k,,kind]) => { const el = $("d_"+k); if(kind==="check"){ if(el.checked) data[k] = true; } else { const v = el.value.trim(); if(v!=="") data[k] = v; } });
   if(type==="task" && data.done) data.doneAt = editing?.data?.doneAt || new Date().toISOString();
   if(type==="task" && data.due && ["monthly","quarterly","yearly"].includes(data.repeat)) data.anchor = +data.due.slice(8,10);
+  data._updated = new Date().toISOString();
   const entry = {
     id: editing ? editing.id : crypto.randomUUID(), type, title: $("f_title").value.trim(), data,
     tags: $("f_tags").value.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean),
@@ -289,7 +294,7 @@ $("list").onclick = async ev => {
   const tk = ev.target.closest(".tick");
   if(tk){
     const e = entries.find(x=>x.id===tk.closest(".row").dataset.id); if(!e) return;
-    const nd = {...e.data};
+    const nd = {...e.data, _updated: new Date().toISOString()};
     const rep = nd.repeat || "none";
     if(rep!=="none" && nd.due){ nd.due = addPeriod(nd.due, rep, nd.anchor); }
     else if(!nd.done){ nd.done = true; nd.doneAt = new Date().toISOString(); }
@@ -302,7 +307,7 @@ $("list").onclick = async ev => {
   if(st){
     const e = entries.find(x=>x.id===st.closest(".row").dataset.id); if(!e) return;
     const n = Math.max(0, (parseInt(e.data?.qty,10)||0) + parseInt(st.dataset.d,10));
-    e.data = {...e.data, qty:n}; render();
+    e.data = {...e.data, qty:n, _updated: new Date().toISOString()}; render();
     try{ await Store.save(e); } catch(err){ alert("Could not save: "+err.message); refresh(); }
     return;
   }
