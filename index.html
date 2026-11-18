@@ -204,7 +204,7 @@ function render(){
   const shown = base.filter(e => (!typeFilter||e.type===typeFilter) && (!tagFilter||(e.tags||[]).includes(tagFilter)) && (!q||q.split(/\s+/).every(w => text(e).includes(w))) && (!kindFilter || e.type!=="task" || kindOf(e)===kindFilter) && (showDone||!staleDone(e)));
   if(p==="tasks") shown.sort((a,b) => (a.data?.done?1:0)-(b.data?.done?1:0) || (occ(a)||"9999").localeCompare(occ(b)||"9999"));
   renderStrips(p);
-  const showResults = showAll || Boolean(q||typeFilter||tagFilter);
+  const showResults = showAll || Boolean(q||typeFilter||tagFilter||kindFilter||(p==="tasks" && showDone));
   $("showAll").textContent = showAll ? "Hide all" : "Show all"; $("showAll").setAttribute("aria-expanded", String(showAll));
   if(p==="home"||p==="cards") renderBest(q); else $("best").innerHTML = "";
   $("list").innerHTML = !showResults ? (p==="home" ? "" : '<div class="empty">List hidden. Search, tap a filter, or press Show all.</div>') : shown.length ? shown.map(row).join("") : `<div class="empty">${entries.length ? "Nothing here. Try fewer words, or add an entry." : "No entries yet. Tap “Add entry” to start."}</div>`;
