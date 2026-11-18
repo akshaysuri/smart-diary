@@ -55,12 +55,17 @@ nav a:focus-visible,.row a:focus-visible,.linkbtn:focus-visible{outline:3px soli
 .tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
 .tools button{padding:8px 14px;font:inherit;font-size:14px;border:1px solid var(--ink);border-radius:6px;background:#fff;cursor:pointer}
 .stamps{font-size:13px;color:var(--mute);margin:14px 0 0}
+[hidden]{display:none!important}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.top h1{margin:0}
+.signout{background:none;border:1px solid var(--line);border-radius:6px;padding:6px 12px;font:inherit;font-size:14px;cursor:pointer;color:var(--ink)}
+.loginCard{background:var(--panel);padding:20px;border-radius:10px;border:1px solid var(--line);max-width:380px}
+.err{color:#b42318;font-size:14px;min-height:1.3em;margin:10px 0 0}
 @media (prefers-reduced-motion:no-preference){.row{transition:border-color .15s}.row:hover{border-color:var(--ink)}}
 </style>
 </head>
 <body>
-<main>
-  <h1>Smart Diary</h1>
+<main id="app" hidden>
+  <div class="top"><h1>Smart Diary</h1><button type="button" class="signout" id="signOut" hidden>Sign out</button></div>
   <nav id="nav" aria-label="Pages"></nav>
   <div id="notice"></div>
   <div id="strips"></div>
@@ -74,7 +79,18 @@ nav a:focus-visible,.row a:focus-visible,.linkbtn:focus-visible{outline:3px soli
   <div class="tools"><button id="expJson" type="button">Export JSON</button><button id="expCsv" type="button">Export CSV</button><button id="impBtn" type="button">Import JSON</button><input id="impFile" type="file" accept="application/json,.json" hidden></div>
   -->
 </main>
-<button class="fab" id="add">+ Add entry</button>
+<main id="loginBox" hidden>
+  <h1>Smart Diary</h1>
+  <form id="loginForm" class="loginCard">
+    <label for="l_email">Email</label>
+    <input id="l_email" type="email" autocomplete="username" required>
+    <label for="l_pass">Password</label>
+    <input id="l_pass" type="password" autocomplete="current-password" required>
+    <div class="actions"><button class="primary" type="submit">Sign in</button></div>
+    <p id="loginErr" class="err" role="alert"></p>
+  </form>
+</main>
+<button class="fab" id="add" hidden>+ Add entry</button>
 
 <dialog id="dlg">
   <form method="dialog" id="form" onsubmit="return false">
@@ -86,6 +102,7 @@ nav a:focus-visible,.row a:focus-visible,.linkbtn:focus-visible{outline:3px soli
     <div id="dyn"></div>
     <label for="f_tags">Tags (comma separated, e.g. gardening, plumbing)</label>
     <input id="f_tags">
+    <label class="chk" id="shareRow" hidden><input id="f_shared" type="checkbox"> Share with family</label>
     <p id="stamps" class="stamps" hidden></p>
     <div class="actions">
       <button class="primary" id="save">Save</button>
@@ -114,6 +131,9 @@ const TYPES = {
     ["done","Done (closes it)","check"],["notes","Notes","area"]]},
   note:    {label:"Note",    color:"var(--note)",    fields:[["notes","Details","area"]]}
 };
+// Sharing is built but hidden. Flip to true once the sharing SQL has been run and you want it visible.
+const FEATURES = { sharing: false };
+const DEFAULT_SHARED = {tool:true, waste:true, contact:true, task:false, card:false, note:false};
 const $ = id => document.getElementById(id);
 const sb = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 let entries = [], typeFilter = null, tagFilter = null, editing = null, showDone = false, showAll = false, kindFilter = null;
@@ -223,7 +243,7 @@ function row(e){
   }
   else L.push(esc(d.notes||""));
   const strike = e.type==="task" && d.done ? ' style="text-decoration:line-through"' : "";
-  return `<div class="row" role="button" tabindex="0" data-id="${e.id}"><i style="background:${t.color}"></i><span class="body"><div class="t"${strike}>${esc(e.title)}</div><div class="d">${L.filter(Boolean).join("\n")}</div><div class="tags">${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${side}</span></div>`;
+  return `<div class="row" role="button" tabindex="0" data-id="${e.id}"><i style="background:${t.color}"></i><span class="body"><div class="t"${strike}>${esc(e.title)}</div><div class="d">${L.filter(Boolean).join("\n")}</div><div class="tags">${FEATURES.sharing && e.shared ? "👥 shared " : ""}${(e.tags||[]).map(x=>"#"+esc(x)).join(" ")}</div></span><span class="side">${side}</span></div>`;
 }
 
 // "Which card?" ranking: when the search matches a rule line on a card, rank cards by that percentage
@@ -261,7 +281,9 @@ function openDlg(e){
   $("f_tags").value = e ? (e.tags||[]).join(", ") : (tagFilter || "");
   buildFields($("f_type").value, e ? e.data : {});
   $("dlgTitle").textContent = e ? "Edit entry" : "Add entry";
-  $("del").hidden = !e;
+  $("del").hidden = !e || (FEATURES.sharing && e.user_id && e.user_id!==me);
+  const shareOn = FEATURES.sharing && !!sb; $("shareRow").hidden = !shareOn;
+  if(shareOn){ $("f_shared").checked = e ? !!e.shared : !!DEFAULT_SHARED[$("f_type").value]; $("f_shared").disabled = !!(e && e.user_id && e.user_id!==me); }
   $("stamps").hidden = !e; if(e) $("stamps").textContent = "Created "+fmtStamp(e.created_at)+" · Last modified "+fmtStamp(e.data?._updated);
   $("dlg").showModal(); $("f_title").focus();
 }
@@ -277,6 +299,7 @@ async function save(){
     tags: $("f_tags").value.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean),
     created_at: editing ? editing.created_at : new Date().toISOString()
   };
+  if(FEATURES.sharing && sb) entry.shared = $("f_shared").checked;
   try{ await Store.save(entry); $("dlg").close(); await refresh(); }
   catch(err){ alert("Could not save: "+err.message); }
 }
@@ -287,7 +310,7 @@ $("add").onclick = () => openDlg();
 $("showAll").onclick = () => { showAll = !showAll; if(showAll){ $("q").value = ""; typeFilter = null; tagFilter = null; } render(); };
 $("cancel").onclick = () => $("dlg").close();
 $("save").onclick = save;
-$("f_type").onchange = () => buildFields($("f_type").value);
+$("f_type").onchange = () => { buildFields($("f_type").value); if(!editing && FEATURES.sharing && sb) $("f_shared").checked = !!DEFAULT_SHARED[$("f_type").value]; };
 $("del").onclick = async () => { if(editing && confirm("Delete “"+editing.title+"”?")){ try{ await Store.remove(editing.id); $("dlg").close(); await refresh(); }catch(err){ alert("Could not delete: "+err.message); } } };
 $("list").onclick = async ev => {
   if(ev.target.closest("a")) return;
@@ -345,7 +368,28 @@ $("impFile").onchange = async ev => {
 };
 
 */
-refresh();
+// ---- login (Supabase Auth, email + password). Local mode (no Supabase keys) skips it.
+let me = null, loadedFor;
+function setSession(session){
+  me = session?.user?.id || null;
+  const on = !sb || !!me;
+  $("app").hidden = !on; $("loginBox").hidden = on; $("add").hidden = !on; $("signOut").hidden = !sb || !me;
+  if(on){ if(loadedFor !== me){ loadedFor = me; refresh(); } }
+  else { loadedFor = undefined; entries = []; }
+}
+async function boot(){
+  if(!sb){ setSession(null); return; }
+  const {data} = await sb.auth.getSession();
+  setSession(data.session);
+  sb.auth.onAuthStateChange((_ev, session) => setTimeout(() => setSession(session), 0));
+}
+$("loginForm").addEventListener("submit", async ev => {
+  ev.preventDefault(); $("loginErr").textContent = "";
+  const {error} = await sb.auth.signInWithPassword({email:$("l_email").value.trim(), password:$("l_pass").value});
+  if(error) $("loginErr").textContent = error.message; else $("l_pass").value = "";
+});
+$("signOut").onclick = () => sb.auth.signOut();
+boot();
 </script>
 </body>
 </html>
