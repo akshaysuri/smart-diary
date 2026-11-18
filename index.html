@@ -131,7 +131,8 @@ const TYPES = {
     ["done","Done (closes it)","check"],["notes","Notes","area"]]},
   note:    {label:"Note",    color:"var(--note)",    fields:[["notes","Details","area"]]}
 };
-// Sharing is built but hidden. Flip to true once the sharing SQL has been run and you want it visible.
+// Per-entry "Share with family" option is hidden for now. Everything is shared (the database defaults shared=true),
+// and every entry still gets its creator's id. Set to true later to show the option.
 const FEATURES = { sharing: false };
 const DEFAULT_SHARED = {tool:true, waste:true, contact:true, task:false, card:false, note:false};
 const $ = id => document.getElementById(id);
@@ -176,7 +177,7 @@ const Store = {
     i>=0 ? all[i]=e : all.unshift(e); localStorage.setItem("diary", JSON.stringify(all));
   },
   async remove(id){
-    if(sb){ const {error} = await sb.from("entries").delete().eq("id",id); if(error) throw error; return; }
+    if(sb){ const {data,error} = await sb.from("entries").delete().eq("id",id).select(); if(error) throw error; if(!data.length) throw new Error("Only the person who added this entry can delete it."); return; }
     const all = (await this.load()).filter(x=>x.id!==id); localStorage.setItem("diary", JSON.stringify(all));
   }
 };
@@ -281,7 +282,7 @@ function openDlg(e){
   $("f_tags").value = e ? (e.tags||[]).join(", ") : (tagFilter || "");
   buildFields($("f_type").value, e ? e.data : {});
   $("dlgTitle").textContent = e ? "Edit entry" : "Add entry";
-  $("del").hidden = !e || (FEATURES.sharing && e.user_id && e.user_id!==me);
+  $("del").hidden = !e || !!(e.user_id && e.user_id!==me);
   const shareOn = FEATURES.sharing && !!sb; $("shareRow").hidden = !shareOn;
   if(shareOn){ $("f_shared").checked = e ? !!e.shared : !!DEFAULT_SHARED[$("f_type").value]; $("f_shared").disabled = !!(e && e.user_id && e.user_id!==me); }
   $("stamps").hidden = !e; if(e) $("stamps").textContent = "Created "+fmtStamp(e.created_at)+" · Last modified "+fmtStamp(e.data?._updated);
